@@ -147,6 +147,8 @@ public class Metronome : Singleton<Metronome>
 
         timer = 0f;
         State = MetronomeState.Playing;
+        Beat();
+        timer = 0f;
     }
 
     public void Pause()
