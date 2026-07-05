@@ -29,14 +29,23 @@ public class UI_MetronomeInfo : MonoBehaviour
             return;
         }
 
+        metronome.OnChangeBPM.AddListener(OnBPMChanged);
         metronome.UpdateInfo(MetronomeInfo.BPM, 120);
 
+        OnBPMChanged(metronome.bpm);
+    }
+
+    private void OnDestroy()
+    {
         if (BPMSlider != null)
         {
-            BPMSlider.value = metronome.bpm;
+            BPMSlider.onValueChanged.RemoveListener(OnBPMSliderChanged);
         }
 
-        UpdateMetronomeInfo();
+        if (metronome != null)
+        {
+            metronome.OnChangeBPM.RemoveListener(OnBPMChanged);
+        }
     }
 
     private void OnBPMSliderChanged(float value)
@@ -47,16 +56,18 @@ public class UI_MetronomeInfo : MonoBehaviour
         }
 
         metronome.UpdateInfo(MetronomeInfo.BPM, (int)value);
-        UpdateMetronomeInfo();
     }
 
-    private void UpdateMetronomeInfo()
+    private void OnBPMChanged(int bpm)
     {
-        if (bpmText == null || metronome == null)
+        if (bpmText != null)
         {
-            return;
+            bpmText.text = bpm.ToString();
         }
 
-        bpmText.text = metronome.bpm.ToString();
+        if (BPMSlider != null)
+        {
+            BPMSlider.SetValueWithoutNotify(bpm);
+        }
     }
 }

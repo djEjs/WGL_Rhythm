@@ -24,18 +24,20 @@ public enum AccentType
 public class Metronome : Singleton<Metronome>
 {
     public const int MinBeats = 1;
-    public const int MaxBeats = 12;
+    public const int MaxBeats = 7;
 
     public int bpm { get; private set; } = 120;
     public int beats { get; private set; } = 4;
     public MetronomeState State { get; private set; } = MetronomeState.Stopped;
 
-    private float interval = 0;
-    private float timer = 0;
+    private double interval = 0;
+    private double nextBeatTime = 0;
 
     private int currentBeatIndex = 0;
 
     public UnityEvent<int, AccentType> OnBeat = new UnityEvent<int, AccentType>();
+
+    public UnityEvent<int> OnChangeBPM = new UnityEvent<int>();
 
     public UnityEvent<int> OnChangeBeat = new UnityEvent<int>();
 
@@ -67,16 +69,29 @@ public class Metronome : Singleton<Metronome>
             return;
         }
 
-        timer += Time.deltaTime;
-        if (timer >= interval)
+        double now = AudioSettings.dspTime;
+        int processedBeats = 0;
+
+        while (now >= nextBeatTime && processedBeats < BeatInfo.Count)
         {
-            timer -= interval;
             Beat();
+            nextBeatTime += interval;
+            processedBeats++;
+        }
+
+        if (processedBeats >= BeatInfo.Count && now >= nextBeatTime)
+        {
+            nextBeatTime = now + interval;
         }
     }
     private void UpdateInterval()
     {
-        interval = 60f / bpm;
+        interval = 60.0 / bpm;
+
+        if (State == MetronomeState.Playing)
+        {
+            nextBeatTime = AudioSettings.dspTime + interval;
+        }
     }
     private void Beat()
     {
@@ -98,7 +113,9 @@ public class Metronome : Singleton<Metronome>
         AccentType currentAccent = BeatInfo[currentBeatIndex];
         OnBeat?.Invoke(currentBeatIndex, currentAccent);
 
-        print($"Beat {currentBeatIndex + 1}: {currentAccent}");
+#if UNITY_EDITOR
+        Debug.Log($"Beat {currentBeatIndex + 1}: {currentAccent}");
+#endif
 
         currentBeatIndex = (currentBeatIndex + 1) % BeatInfo.Count;
     }
@@ -110,6 +127,7 @@ public class Metronome : Singleton<Metronome>
             case MetronomeInfo.BPM:
                 bpm = value;
                 UpdateInterval();
+                OnChangeBPM?.Invoke(bpm);
                 break;
             case MetronomeInfo.Beat:
                 beats = Mathf.Clamp(value, MinBeats, MaxBeats);
@@ -145,10 +163,9 @@ public class Metronome : Singleton<Metronome>
             ResetBeatSequence();
         }
 
-        timer = 0f;
         State = MetronomeState.Playing;
         Beat();
-        timer = 0f;
+        nextBeatTime = AudioSettings.dspTime + interval;
     }
 
     public void Pause()
@@ -162,7 +179,7 @@ public class Metronome : Singleton<Metronome>
     public void Stop()
     {
         State = MetronomeState.Stopped;
-        timer = 0f;
+        nextBeatTime = 0;
         ResetBeatSequence();
     }
 

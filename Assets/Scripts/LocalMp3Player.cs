@@ -3,14 +3,17 @@ using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+using TMPro;
+using UnityEngine.Events;
 
-public class LocalMp3Player : MonoBehaviour
+public class LocalMp3Player : Singleton<LocalMp3Player>
 {
     [SerializeField] private Button loadButton;
     [SerializeField] private Button playButton;
     [SerializeField] private Button pauseButton;
     [SerializeField] private Button stopButton;
     [SerializeField] private AudioSource audioSource;
+    [SerializeField] private TMP_Text fileNameText;
 
     private string currentBlobUrl;
     private Coroutine loadingRoutine;
@@ -22,12 +25,62 @@ public class LocalMp3Player : MonoBehaviour
 
     [DllImport("__Internal")]
     private static extern void RevokeLocalMp3Url(string blobUrl);
+
+    [DllImport("__Internal")]
+    private static extern void PlayLocalMp3File();
+
+    [DllImport("__Internal")]
+    private static extern void PauseLocalMp3File();
+
+    [DllImport("__Internal")]
+    private static extern void StopLocalMp3File();
+
+    [DllImport("__Internal")]
+    private static extern int IsLocalMp3Playing();
 #endif
 
-    public bool HasClip => audioSource != null && audioSource.clip != null;
+#if UNITY_WEBGL && !UNITY_EDITOR
+    private bool hasWebGLTrack;
+    private bool isWebGLPlaying;
+#endif
 
-    private void Awake()
+    public bool HasClip
     {
+        get
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return hasWebGLTrack;
+#else
+            return audioSource != null && audioSource.clip != null;
+#endif
+        }
+    }
+
+    public bool IsPlaying
+    {
+        get
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return isWebGLPlaying;
+#else
+            return audioSource != null && audioSource.isPlaying;
+#endif
+        }
+    }
+
+    public AudioSource AudioSource
+    {
+        get => audioSource;
+        private set => audioSource = value;
+    }
+    public UnityEvent<AudioClip> OnClipLoaded = new UnityEvent<AudioClip>();
+    public UnityEvent OnPlay = new UnityEvent();
+    public UnityEvent OnPause = new UnityEvent();
+
+    protected override void Awake()
+    {
+        base.Awake();
+
         if (audioSource == null)
         {
             audioSource = GetComponent<AudioSource>();
@@ -89,9 +142,10 @@ public class LocalMp3Player : MonoBehaviour
         }
     }
 
-    private void OnDestroy()
+    protected override void OnDestroy()
     {
         RevokeCurrentBlobUrl();
+        base.OnDestroy();
     }
 
     public void OpenFilePicker()
@@ -110,12 +164,18 @@ public class LocalMp3Player : MonoBehaviour
             return;
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        PlayLocalMp3File();
+        isWebGLPlaying = true;
+#else
         if (audioSource.time >= audioSource.clip.length)
         {
             audioSource.time = 0f;
         }
 
         audioSource.Play();
+#endif
+        OnPlay?.Invoke();
         UpdateButtons();
     }
 
@@ -126,7 +186,13 @@ public class LocalMp3Player : MonoBehaviour
             return;
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        PauseLocalMp3File();
+        isWebGLPlaying = false;
+#else
         audioSource.Pause();
+#endif
+        OnPause?.Invoke();
         UpdateButtons();
     }
 
@@ -137,8 +203,13 @@ public class LocalMp3Player : MonoBehaviour
             return;
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        StopLocalMp3File();
+        isWebGLPlaying = false;
+#else
         audioSource.Stop();
         audioSource.time = 0f;
+#endif
         UpdateButtons();
     }
 
@@ -154,12 +225,29 @@ public class LocalMp3Player : MonoBehaviour
         string blobUrl = payload.Substring(0, separatorIndex);
         string fileName = payload.Substring(separatorIndex + 1);
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        RevokeCurrentBlobUrl();
+        currentBlobUrl = blobUrl;
+        hasWebGLTrack = true;
+        isWebGLPlaying = false;
+        loadingRoutine = null;
+
+        Debug.Log($"Loaded local MP3: {fileName}");
+        if (fileNameText != null)
+        {
+            fileNameText.text = fileName;
+        }
+
+        UpdateButtons();
+        OnClipLoaded?.Invoke(null);
+#else
         if (loadingRoutine != null)
         {
             StopCoroutine(loadingRoutine);
         }
 
         loadingRoutine = StartCoroutine(LoadMp3Clip(blobUrl, fileName));
+#endif
     }
 
     public void OnLocalMp3SelectionCanceled(string message)
@@ -172,8 +260,27 @@ public class LocalMp3Player : MonoBehaviour
         Debug.LogError(message);
     }
 
+    public void OnLocalMp3Ended(string message)
+    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        isWebGLPlaying = false;
+        UpdateButtons();
+#endif
+    }
+
     private void Update()
     {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        bool playing = IsLocalMp3Playing() == 1;
+        if (wasPlaying == playing)
+        {
+            return;
+        }
+
+        wasPlaying = playing;
+        isWebGLPlaying = playing;
+        UpdateButtons();
+#else
         if (audioSource == null || wasPlaying == audioSource.isPlaying)
         {
             return;
@@ -181,6 +288,7 @@ public class LocalMp3Player : MonoBehaviour
 
         wasPlaying = audioSource.isPlaying;
         UpdateButtons();
+#endif
     }
 
     private IEnumerator LoadMp3Clip(string blobUrl, string fileName)
@@ -214,7 +322,13 @@ public class LocalMp3Player : MonoBehaviour
         loadingRoutine = null;
 
         Debug.Log($"Loaded local MP3: {fileName}");
+        if (fileNameText != null)
+        {
+            fileNameText.text = fileName;
+        }
+
         UpdateButtons();
+        OnClipLoaded?.Invoke(clip);
     }
 
     private void UpdateButtons(bool canLoad = true)
@@ -225,15 +339,16 @@ public class LocalMp3Player : MonoBehaviour
         }
 
         bool hasClip = HasClip;
+        bool isPlaying = IsPlaying;
 
         if (playButton != null)
         {
-            playButton.interactable = hasClip && !audioSource.isPlaying;
+            playButton.interactable = hasClip && !isPlaying;
         }
 
         if (pauseButton != null)
         {
-            pauseButton.interactable = hasClip && audioSource.isPlaying;
+            pauseButton.interactable = hasClip && isPlaying;
         }
 
         if (stopButton != null)
