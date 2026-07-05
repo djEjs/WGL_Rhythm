@@ -55,6 +55,7 @@ public class Metronome : Singleton<Metronome>
     protected override void Awake()
     {
         base.Awake();
+        Application.runInBackground = true;
     }
     private void Start()
     {
