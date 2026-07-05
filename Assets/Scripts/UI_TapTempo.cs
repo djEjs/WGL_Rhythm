@@ -54,6 +54,7 @@ public class UI_TapTempo : MonoBehaviour
     {
         double now = Time.unscaledTimeAsDouble;
 
+        // ^1 = tapTimes.count - 1
         if (tapTimes.Count > 0 && now - tapTimes[^1] > resetAfterSeconds)
         {
             tapTimes.Clear();

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class SoundManager : Singleton<SoundManager>
@@ -10,6 +11,8 @@ public class SoundManager : Singleton<SoundManager>
     [SerializeField]
     private AudioClip sfx_beatSound_Weak;
 
+    private Dictionary<AccentType, AudioClip> beatSoundMap;
+
     protected override void Awake()
     {
         base.Awake();
@@ -18,6 +21,12 @@ public class SoundManager : Singleton<SoundManager>
         {
             audioSource = gameObject.AddComponent<AudioSource>();
         }
+        beatSoundMap = new Dictionary<AccentType, AudioClip>
+        {
+            { AccentType.None, null },
+            { AccentType.Strong, sfx_beatSound_Strong },
+            { AccentType.Weak, sfx_beatSound_Weak }
+        };
     }
     private void Start()
     {
@@ -37,14 +46,7 @@ public class SoundManager : Singleton<SoundManager>
     
     private void PlayBeatSound(int beatIndex, AccentType accentType)
     {
-        if (accentType == AccentType.Strong)
-        {
-            PlaySound(sfx_beatSound_Strong);
-        }
-        else if (accentType == AccentType.Weak)
-        {
-            PlaySound(sfx_beatSound_Weak);
-        }
+        PlaySound(beatSoundMap.ContainsKey(accentType) ? beatSoundMap[accentType] : null);
     }
 
     public void PlaySound(AudioClip clip)
