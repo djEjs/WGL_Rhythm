@@ -52,17 +52,16 @@
       }
 
       var buildUrl = "Build";
-      var buildVersion = "20260705-2210";
-      var loaderUrl = buildUrl + "/WGL.loader.js?v=" + buildVersion;
+      var loaderUrl = buildUrl + "/WGL.loader.js";
       var config = {
         arguments: [],
-        dataUrl: buildUrl + "/WGL.data.unityweb?v=" + buildVersion,
-        frameworkUrl: buildUrl + "/WGL.framework.js.unityweb?v=" + buildVersion,
-        codeUrl: buildUrl + "/WGL.wasm.unityweb?v=" + buildVersion,
+        dataUrl: buildUrl + "/WGL.data.unityweb",
+        frameworkUrl: buildUrl + "/WGL.framework.js.unityweb",
+        codeUrl: buildUrl + "/WGL.wasm.unityweb",
         streamingAssetsUrl: "StreamingAssets",
         companyName: "DefaultCompany",
         productName: "WGL_Rhythm",
-        productVersion: buildVersion,
+        productVersion: "1.0",
         showBanner: unityShowBanner,
         // errorHandler: function(err, url, line) {
         //    alert("error " + err + " occurred at line " + line);

@@ -24,7 +24,7 @@ public enum AccentType
 public class Metronome : Singleton<Metronome>
 {
     public const int MinBeats = 1;
-    public const int MaxBeats = 7;
+    public const int MaxBeats = 8;
 
     public int bpm { get; private set; } = 120;
     public int beats { get; private set; } = 4;
