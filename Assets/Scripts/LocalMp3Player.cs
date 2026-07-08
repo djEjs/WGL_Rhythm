@@ -96,6 +96,7 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
     }
 
     public UnityEvent<AudioClip> OnClipLoaded = new UnityEvent<AudioClip>();
+    public UnityEvent OnLocalMp3Loaded = new UnityEvent();
     public UnityEvent OnPlay = new UnityEvent();
     public UnityEvent OnPause = new UnityEvent();
 
@@ -309,6 +310,12 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         hasWebGLTrack = true;
         isWebGLPlaying = false;
         loadingRoutine = null;
+        if (audioSource != null)
+        {
+            audioSource.Stop();
+            audioSource.clip = null;
+        }
+        destroyCurrentAudioClipOnReplace = false;
 
         Debug.Log($"Loaded local MP3: {fileName}");
         if (fileNameText != null)
@@ -318,6 +325,7 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 
         UpdateButtons();
         OnClipLoaded?.Invoke(null);
+        OnLocalMp3Loaded?.Invoke();
 #else
         if (loadingRoutine != null)
         {
@@ -396,6 +404,7 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 
         Debug.Log($"Loaded local MP3: {fileName}");
         LoadAudioClip(clip, fileName, true);
+        OnLocalMp3Loaded?.Invoke();
     }
 
     private void UpdateButtons(bool canLoad = true)

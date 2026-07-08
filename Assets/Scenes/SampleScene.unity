@@ -978,7 +978,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 307.77002, y: -25}
-  m_SizeDelta: {x: 60.28, y: 50}
+  m_SizeDelta: {x: 0, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &414669821
 MonoBehaviour:
@@ -2121,9 +2121,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI_AddressableSampleTrackLoader
   mp3Player: {fileID: 1497686951}
-  sampleTracks: []
+  sampleTrackLabel: sample-track
+  autoPopulateFromLabel: 1
+  fallbackSampleTracks: []
   trackDropdown: {fileID: 809636641}
   loadSelectedButton: {fileID: 1062784002}
+  useLoadSelectedButton: 0
+  loadOnDropdownValueChanged: 1
+  emptyDropdownLabel: 
   statusText: {fileID: 551798438}
   playAfterLoad: 0
 --- !u!1 &853464900
@@ -2385,7 +2390,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 218.86, y: -25}
-  m_SizeDelta: {x: 97.54, y: 50}
+  m_SizeDelta: {x: 0, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &869038300
 MonoBehaviour:
@@ -4187,6 +4192,9 @@ MonoBehaviour:
   audioSource: {fileID: 1497686952}
   fileNameText: {fileID: 551798438}
   OnClipLoaded:
+    m_PersistentCalls:
+      m_Calls: []
+  OnLocalMp3Loaded:
     m_PersistentCalls:
       m_Calls: []
   OnPlay:

@@ -26,6 +26,9 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
     [SerializeField] private AddressableSampleTrack[] fallbackSampleTracks;
     [SerializeField] private TMP_Dropdown trackDropdown;
     [SerializeField] private Button loadSelectedButton;
+    [SerializeField] private bool useLoadSelectedButton;
+    [SerializeField] private bool loadOnDropdownValueChanged = true;
+    [SerializeField] private string emptyDropdownLabel = "";
     [SerializeField] private TMP_Text statusText;
     [SerializeField] private bool playAfterLoad;
 
@@ -57,9 +60,21 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
 
     private void OnEnable()
     {
-        if (loadSelectedButton != null)
+        ResolveMp3Player();
+
+        if (useLoadSelectedButton && loadSelectedButton != null)
         {
             loadSelectedButton.onClick.AddListener(LoadSelectedTrack);
+        }
+
+        if (loadOnDropdownValueChanged && trackDropdown != null)
+        {
+            trackDropdown.onValueChanged.AddListener(OnDropdownValueChanged);
+        }
+
+        if (mp3Player != null)
+        {
+            mp3Player.OnLocalMp3Loaded.AddListener(OnLocalMp3Loaded);
         }
 
         RegisterFallbackButtons();
@@ -68,9 +83,19 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
 
     private void OnDisable()
     {
-        if (loadSelectedButton != null)
+        if (useLoadSelectedButton && loadSelectedButton != null)
         {
             loadSelectedButton.onClick.RemoveListener(LoadSelectedTrack);
+        }
+
+        if (loadOnDropdownValueChanged && trackDropdown != null)
+        {
+            trackDropdown.onValueChanged.RemoveListener(OnDropdownValueChanged);
+        }
+
+        if (mp3Player != null)
+        {
+            mp3Player.OnLocalMp3Loaded.RemoveListener(OnLocalMp3Loaded);
         }
 
         UnregisterFallbackButtons();
@@ -97,23 +122,65 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
     public void LoadSelectedTrack()
     {
         int selectedIndex = trackDropdown != null ? trackDropdown.value : 0;
-        LoadTrack(selectedIndex);
+        LoadTrack(selectedIndex, playAfterLoad);
     }
 
     public void LoadTrack(int trackIndex)
+    {
+        LoadTrack(trackIndex, playAfterLoad);
+    }
+
+    public void LoadAndPlaySelectedTrack()
+    {
+        int selectedIndex = trackDropdown != null ? trackDropdown.value : 0;
+        LoadTrack(selectedIndex, true);
+    }
+
+    private void OnDropdownValueChanged(int trackIndex)
+    {
+        LoadTrack(trackIndex, false);
+    }
+
+    public void ClearDropdownSelection()
+    {
+        if (trackDropdown == null)
+        {
+            return;
+        }
+
+        trackDropdown.SetValueWithoutNotify(0);
+        trackDropdown.RefreshShownValue();
+        UpdateControls();
+    }
+
+    private void OnLocalMp3Loaded()
+    {
+        ReleaseLoadedClip();
+        ClearDropdownSelection();
+    }
+
+    private void LoadTrack(int trackIndex, bool playWhenLoaded)
     {
         if (isLoading || isPopulating)
         {
             return;
         }
 
-        if (autoTrackLocations.Count > 0)
+        if (trackIndex <= 0)
         {
-            LoadAutoTrack(trackIndex);
+            SetStatus("Select a sample track.");
+            UpdateControls();
             return;
         }
 
-        LoadFallbackTrack(trackIndex);
+        int assetIndex = trackIndex - 1;
+        if (autoTrackLocations.Count > 0)
+        {
+            LoadAutoTrack(assetIndex, playWhenLoaded);
+            return;
+        }
+
+        LoadFallbackTrack(assetIndex, playWhenLoaded);
     }
 
     private void PopulateDropdownFromLabel()
@@ -173,7 +240,7 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
         UpdateControls();
     }
 
-    private void LoadAutoTrack(int trackIndex)
+    private void LoadAutoTrack(int trackIndex, bool playWhenLoaded)
     {
         if (trackIndex < 0 || trackIndex >= autoTrackLocations.Count)
         {
@@ -194,10 +261,10 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
         UpdateControls();
 
         AsyncOperationHandle<AudioClip> handle = Addressables.LoadAssetAsync<AudioClip>(location);
-        handle.Completed += completedHandle => OnTrackLoaded(trackName, completedHandle);
+        handle.Completed += completedHandle => OnTrackLoaded(trackName, completedHandle, playWhenLoaded);
     }
 
-    private void LoadFallbackTrack(int trackIndex)
+    private void LoadFallbackTrack(int trackIndex, bool playWhenLoaded)
     {
         if (trackIndex < 0 || trackIndex >= fallbackSampleTracks.Length)
         {
@@ -222,10 +289,10 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
         UpdateControls();
 
         AsyncOperationHandle<AudioClip> handle = track.audioClip.LoadAssetAsync();
-        handle.Completed += completedHandle => OnTrackLoaded(track.Label, completedHandle);
+        handle.Completed += completedHandle => OnTrackLoaded(track.Label, completedHandle, playWhenLoaded);
     }
 
-    private void OnTrackLoaded(string trackName, AsyncOperationHandle<AudioClip> handle)
+    private void OnTrackLoaded(string trackName, AsyncOperationHandle<AudioClip> handle, bool playWhenLoaded)
     {
         isLoading = false;
 
@@ -249,7 +316,7 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
             Addressables.Release(previousHandle);
         }
 
-        if (playAfterLoad)
+        if (playWhenLoaded)
         {
             mp3Player.Play();
         }
@@ -266,7 +333,7 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
             if (fallbackSampleTracks[i].button != null)
             {
                 trackButtonActions ??= new UnityAction[fallbackSampleTracks.Length];
-                trackButtonActions[i] = () => LoadFallbackTrack(trackIndex);
+                trackButtonActions[i] = () => LoadFallbackTrack(trackIndex, playAfterLoad);
                 fallbackSampleTracks[i].button.onClick.AddListener(trackButtonActions[i]);
             }
         }
@@ -303,7 +370,9 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
         }
 
         trackDropdown.ClearOptions();
-        trackDropdown.AddOptions(labels);
+        List<string> dropdownLabels = new List<string> { emptyDropdownLabel };
+        dropdownLabels.AddRange(labels);
+        trackDropdown.AddOptions(dropdownLabels);
         trackDropdown.SetValueWithoutNotify(0);
         trackDropdown.RefreshShownValue();
     }
@@ -324,9 +393,10 @@ public class UI_AddressableSampleTrackLoader : MonoBehaviour
         bool hasAutoTracks = autoTrackLocations.Count > 0;
         bool hasFallbackTracks = fallbackSampleTracks.Length > 0;
 
-        if (loadSelectedButton != null)
+        if (useLoadSelectedButton && loadSelectedButton != null)
         {
-            loadSelectedButton.interactable = !isLoading && !isPopulating && (hasAutoTracks || hasFallbackTracks);
+            bool hasValidSelection = trackDropdown != null && trackDropdown.value > 0;
+            loadSelectedButton.interactable = !isLoading && !isPopulating && hasValidSelection && (hasAutoTracks || hasFallbackTracks);
         }
 
         for (int i = 0; i < fallbackSampleTracks.Length; i++)
