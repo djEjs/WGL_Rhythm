@@ -13,13 +13,15 @@ public class UI_Mp3Visualizer : MonoBehaviour
     [SerializeField] private float smoothing = 12f;
     [SerializeField] private float frequencyCurve = 1.15f;
     [SerializeField] private float highFrequencyBoost = 1.8f;
+    [SerializeField] private float clipFallbackScale = 25f;
+    [SerializeField] private int clipFallbackBinsPerBar = 3;
     [SerializeField] private GameObject barPrefab;
     [SerializeField] private int numberOfBars = 32;
 
     private float[] spectrumData;
     private float[] listenerSpectrumData;
-    private float[] outputData;
     private float[] clipWindowData;
+    private float[] clipMonoData;
     private float[] webGLBarData;
     private readonly List<RectTransform> bars = new List<RectTransform>();
 
@@ -33,8 +35,8 @@ public class UI_Mp3Visualizer : MonoBehaviour
         sampleCount = Mathf.ClosestPowerOfTwo(Mathf.Max(64, sampleCount));
         spectrumData = new float[sampleCount];
         listenerSpectrumData = new float[spectrumData.Length];
-        outputData = new float[spectrumData.Length];
         clipWindowData = new float[spectrumData.Length];
+        clipMonoData = new float[spectrumData.Length];
     }
 
     private void Start()
@@ -71,11 +73,6 @@ public class UI_Mp3Visualizer : MonoBehaviour
         float peak = ReadSpectrumData();
         if (peak <= 0.000001f)
         {
-            peak = ReadOutputData();
-        }
-
-        if (peak <= 0.000001f)
-        {
             if (!UpdateBarsFromAudioClip())
             {
                 DecayBars();
@@ -104,33 +101,6 @@ public class UI_Mp3Visualizer : MonoBehaviour
         }
 
         return 0f;
-    }
-
-    private float ReadOutputData()
-    {
-        audioSource.GetOutputData(outputData, 0);
-        float peak = GetPeak(outputData);
-        if (peak <= 0.000001f)
-        {
-            return 0f;
-        }
-
-        int outputGroupSize = Mathf.Max(1, outputData.Length / spectrumData.Length);
-        for (int i = 0; i < spectrumData.Length; i++)
-        {
-            float sum = 0f;
-            int start = i * outputGroupSize;
-            int end = Mathf.Min(start + outputGroupSize, outputData.Length);
-
-            for (int j = start; j < end; j++)
-            {
-                sum += Mathf.Abs(outputData[j]);
-            }
-
-            spectrumData[i] = sum / Mathf.Max(1, end - start);
-        }
-
-        return peak;
     }
 
     private bool ResolveAudioSource()
@@ -259,7 +229,13 @@ public class UI_Mp3Visualizer : MonoBehaviour
 
         AudioClip clip = audioSource.clip;
         int channels = Mathf.Max(1, clip.channels);
-        int frameCount = Mathf.Max(1, clipWindowData.Length / channels);
+        int frameCount = sampleCount;
+        int requiredSampleCount = frameCount * channels;
+        if (clipWindowData.Length != requiredSampleCount)
+        {
+            clipWindowData = new float[requiredSampleCount];
+        }
+
         int startSample = Mathf.Clamp(audioSource.timeSamples - frameCount / 2, 0, Mathf.Max(0, clip.samples - frameCount));
 
         if (!clip.GetData(clipWindowData, startSample))
@@ -267,43 +243,79 @@ public class UI_Mp3Visualizer : MonoBehaviour
             return false;
         }
 
-        float peak = GetPeakAbs(clipWindowData);
+        float peak = MixClipWindowToMono(frameCount, channels);
         if (peak <= 0.000001f)
         {
             return false;
         }
 
-        int framesPerBar = Mathf.Max(1, frameCount / bars.Count);
+        int usableBins = frameCount / 2;
+        int binsPerBar = Mathf.Max(1, clipFallbackBinsPerBar);
         for (int i = 0; i < bars.Count; i++)
         {
-            int startFrame = i * framesPerBar;
-            int endFrame = i == bars.Count - 1 ? frameCount : Mathf.Min(frameCount, startFrame + framesPerBar);
+            int startBin = Mathf.FloorToInt(Mathf.Pow((float)i / bars.Count, frequencyCurve) * usableBins);
+            int endBin = Mathf.FloorToInt(Mathf.Pow((float)(i + 1) / bars.Count, frequencyCurve) * usableBins);
+            startBin = Mathf.Clamp(startBin, 1, usableBins - 1);
+            endBin = Mathf.Clamp(endBin, startBin + 1, usableBins);
+
             float sum = 0f;
-            int count = 0;
-
-            for (int frame = startFrame; frame < endFrame; frame++)
+            int count = Mathf.Min(binsPerBar, endBin - startBin);
+            for (int binIndex = 0; binIndex < count; binIndex++)
             {
-                int sampleIndex = frame * channels;
-                float mixedSample = 0f;
-                for (int channel = 0; channel < channels && sampleIndex + channel < clipWindowData.Length; channel++)
-                {
-                    mixedSample += Mathf.Abs(clipWindowData[sampleIndex + channel]);
-                }
-
-                sum += mixedSample / channels;
-                count++;
+                int bin = count == 1
+                    ? (startBin + endBin) / 2
+                    : Mathf.RoundToInt(Mathf.Lerp(startBin, endBin - 1, (float)binIndex / (count - 1)));
+                sum += CalculateDftMagnitude(bin, frameCount);
             }
 
             float average = sum / Mathf.Max(1, count);
             float bandPosition = bars.Count <= 1 ? 0f : (float)i / (bars.Count - 1);
             float bandGain = Mathf.Lerp(1f, highFrequencyBoost, bandPosition);
-            float targetScale = Mathf.Clamp(average * bandGain * visualizerScale, minBarScale, maxBarScale);
+            float targetScale = Mathf.Clamp(average * bandGain * clipFallbackScale, minBarScale, maxBarScale);
             Vector3 scale = bars[i].localScale;
             scale.y = Mathf.Lerp(scale.y, targetScale, Time.unscaledDeltaTime * smoothing);
             bars[i].localScale = scale;
         }
 
         return true;
+    }
+
+    private float MixClipWindowToMono(int frameCount, int channels)
+    {
+        float peak = 0f;
+        for (int frame = 0; frame < frameCount; frame++)
+        {
+            int sampleIndex = frame * channels;
+            float mixedSample = 0f;
+            for (int channel = 0; channel < channels && sampleIndex + channel < clipWindowData.Length; channel++)
+            {
+                mixedSample += clipWindowData[sampleIndex + channel];
+            }
+
+            float monoSample = mixedSample / channels;
+            clipMonoData[frame] = monoSample;
+            peak = Mathf.Max(peak, Mathf.Abs(monoSample));
+        }
+
+        return peak;
+    }
+
+    private float CalculateDftMagnitude(int bin, int frameCount)
+    {
+        float real = 0f;
+        float imaginary = 0f;
+        float phaseStep = 2f * Mathf.PI * bin / frameCount;
+
+        for (int sampleIndex = 0; sampleIndex < frameCount; sampleIndex++)
+        {
+            float window = 0.5f - 0.5f * Mathf.Cos(2f * Mathf.PI * sampleIndex / (frameCount - 1));
+            float sample = clipMonoData[sampleIndex] * window;
+            float phase = phaseStep * sampleIndex;
+            real += sample * Mathf.Cos(phase);
+            imaginary -= sample * Mathf.Sin(phase);
+        }
+
+        return Mathf.Sqrt(real * real + imaginary * imaginary) / frameCount;
     }
 
     private void DecayBars()
@@ -327,14 +339,4 @@ public class UI_Mp3Visualizer : MonoBehaviour
         return peak;
     }
 
-    private static float GetPeakAbs(float[] data)
-    {
-        float peak = 0f;
-        for (int i = 0; i < data.Length; i++)
-        {
-            peak = Mathf.Max(peak, Mathf.Abs(data[i]));
-        }
-
-        return peak;
-    }
 }
