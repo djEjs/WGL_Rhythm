@@ -44,8 +44,22 @@ public class UI_Mp3Visualizer : MonoBehaviour
     private void Update()
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
-        UpdateWebGLBars();
-#else
+        if (mp3Player == null)
+        {
+            LocalMp3Player.TryGetInstance(out mp3Player);
+        }
+
+        if (mp3Player != null && mp3Player.IsUsingWebGLLocalFile)
+        {
+            UpdateWebGLBars();
+            return;
+        }
+#endif
+        UpdateUnityAudioBars();
+    }
+
+    private void UpdateUnityAudioBars()
+    {
         if (!ResolveAudioSource() || !audioSource.isPlaying)
         {
             DecayBars();
@@ -65,7 +79,6 @@ public class UI_Mp3Visualizer : MonoBehaviour
         }
 
         UpdateBars();
-#endif
     }
 
     private float ReadSpectrumData()

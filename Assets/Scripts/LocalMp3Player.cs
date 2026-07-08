@@ -1,13 +1,20 @@
 using System.Collections;
 using System.Runtime.InteropServices;
+using TMPro;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.Networking;
 using UnityEngine.UI;
-using TMPro;
-using UnityEngine.Events;
 
 public class LocalMp3Player : Singleton<LocalMp3Player>
 {
+    private enum TrackSource
+    {
+        None,
+        UnityAudioClip,
+        WebGLLocalFile
+    }
+
     [SerializeField] private Button loadButton;
     [SerializeField] private Button playButton;
     [SerializeField] private Button pauseButton;
@@ -18,6 +25,8 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
     private string currentBlobUrl;
     private Coroutine loadingRoutine;
     private bool wasPlaying;
+    private bool destroyCurrentAudioClipOnReplace;
+    private TrackSource currentTrackSource = TrackSource.None;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     [DllImport("__Internal")]
@@ -37,9 +46,7 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 
     [DllImport("__Internal")]
     private static extern int IsLocalMp3Playing();
-#endif
 
-#if UNITY_WEBGL && !UNITY_EDITOR
     private bool hasWebGLTrack;
     private bool isWebGLPlaying;
 #endif
@@ -49,9 +56,9 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         get
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            return hasWebGLTrack;
+            return hasWebGLTrack || audioSource != null && audioSource.clip != null;
 #else
-            return audioSource != null && audioSource.clip != null;
+            return currentTrackSource != TrackSource.None && audioSource != null && audioSource.clip != null;
 #endif
         }
     }
@@ -61,9 +68,23 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         get
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            return isWebGLPlaying;
+            return currentTrackSource == TrackSource.WebGLLocalFile
+                ? isWebGLPlaying
+                : audioSource != null && audioSource.isPlaying;
 #else
-            return audioSource != null && audioSource.isPlaying;
+            return currentTrackSource != TrackSource.None && audioSource != null && audioSource.isPlaying;
+#endif
+        }
+    }
+
+    public bool IsUsingWebGLLocalFile
+    {
+        get
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            return currentTrackSource == TrackSource.WebGLLocalFile;
+#else
+            return false;
 #endif
         }
     }
@@ -73,6 +94,7 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         get => audioSource;
         private set => audioSource = value;
     }
+
     public UnityEvent<AudioClip> OnClipLoaded = new UnityEvent<AudioClip>();
     public UnityEvent OnPlay = new UnityEvent();
     public UnityEvent OnPause = new UnityEvent();
@@ -92,6 +114,10 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         }
 
         audioSource.playOnAwake = false;
+        if (audioSource.clip != null)
+        {
+            currentTrackSource = TrackSource.UnityAudioClip;
+        }
     }
 
     private void OnEnable()
@@ -145,6 +171,12 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
     protected override void OnDestroy()
     {
         RevokeCurrentBlobUrl();
+
+        if (audioSource != null && audioSource.clip != null && destroyCurrentAudioClipOnReplace)
+        {
+            Destroy(audioSource.clip);
+        }
+
         base.OnDestroy();
     }
 
@@ -165,16 +197,19 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-        PlayLocalMp3File();
-        isWebGLPlaying = true;
-#else
-        if (audioSource.time >= audioSource.clip.length)
+        if (currentTrackSource == TrackSource.WebGLLocalFile)
         {
-            audioSource.time = 0f;
+            PlayLocalMp3File();
+            isWebGLPlaying = true;
         }
-
-        audioSource.Play();
+        else
+        {
+            PlayUnityAudioSource();
+        }
+#else
+        PlayUnityAudioSource();
 #endif
+
         OnPlay?.Invoke();
         UpdateButtons();
     }
@@ -187,11 +222,19 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-        PauseLocalMp3File();
-        isWebGLPlaying = false;
+        if (currentTrackSource == TrackSource.WebGLLocalFile)
+        {
+            PauseLocalMp3File();
+            isWebGLPlaying = false;
+        }
+        else
+        {
+            audioSource.Pause();
+        }
 #else
         audioSource.Pause();
 #endif
+
         OnPause?.Invoke();
         UpdateButtons();
     }
@@ -204,13 +247,47 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
         }
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-        StopLocalMp3File();
-        isWebGLPlaying = false;
+        if (currentTrackSource == TrackSource.WebGLLocalFile)
+        {
+            StopLocalMp3File();
+            isWebGLPlaying = false;
+        }
+        else
+        {
+            StopUnityAudioSource();
+        }
 #else
-        audioSource.Stop();
-        audioSource.time = 0f;
+        StopUnityAudioSource();
 #endif
+
         UpdateButtons();
+    }
+
+    public void LoadAudioClip(AudioClip clip, string displayName, bool destroyOnReplace = false)
+    {
+        if (clip == null)
+        {
+            Debug.LogError("Cannot load a null audio clip.");
+            return;
+        }
+
+        Stop();
+        RevokeCurrentBlobUrl();
+        ReplaceAudioClip(clip, destroyOnReplace);
+        currentTrackSource = TrackSource.UnityAudioClip;
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        hasWebGLTrack = false;
+        isWebGLPlaying = false;
+#endif
+
+        if (fileNameText != null)
+        {
+            fileNameText.text = string.IsNullOrWhiteSpace(displayName) ? clip.name : displayName;
+        }
+
+        UpdateButtons();
+        OnClipLoaded?.Invoke(clip);
     }
 
     public void OnLocalMp3Selected(string payload)
@@ -228,6 +305,7 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 #if UNITY_WEBGL && !UNITY_EDITOR
         RevokeCurrentBlobUrl();
         currentBlobUrl = blobUrl;
+        currentTrackSource = TrackSource.WebGLLocalFile;
         hasWebGLTrack = true;
         isWebGLPlaying = false;
         loadingRoutine = null;
@@ -271,16 +349,21 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
     private void Update()
     {
 #if UNITY_WEBGL && !UNITY_EDITOR
-        bool playing = IsLocalMp3Playing() == 1;
-        if (wasPlaying == playing)
+        if (currentTrackSource == TrackSource.WebGLLocalFile)
         {
+            bool playing = IsLocalMp3Playing() == 1;
+            if (wasPlaying == playing)
+            {
+                return;
+            }
+
+            wasPlaying = playing;
+            isWebGLPlaying = playing;
+            UpdateButtons();
             return;
         }
+#endif
 
-        wasPlaying = playing;
-        isWebGLPlaying = playing;
-        UpdateButtons();
-#else
         if (audioSource == null || wasPlaying == audioSource.isPlaying)
         {
             return;
@@ -288,7 +371,6 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 
         wasPlaying = audioSource.isPlaying;
         UpdateButtons();
-#endif
     }
 
     private IEnumerator LoadMp3Clip(string blobUrl, string fileName)
@@ -309,26 +391,11 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 
         AudioClip clip = DownloadHandlerAudioClip.GetContent(request);
         clip.name = fileName;
-
-        Stop();
-        if (audioSource.clip != null)
-        {
-            Destroy(audioSource.clip);
-        }
-
-        RevokeCurrentBlobUrl();
         currentBlobUrl = blobUrl;
-        audioSource.clip = clip;
         loadingRoutine = null;
 
         Debug.Log($"Loaded local MP3: {fileName}");
-        if (fileNameText != null)
-        {
-            fileNameText.text = fileName;
-        }
-
-        UpdateButtons();
-        OnClipLoaded?.Invoke(clip);
+        LoadAudioClip(clip, fileName, true);
     }
 
     private void UpdateButtons(bool canLoad = true)
@@ -366,6 +433,38 @@ public class LocalMp3Player : Singleton<LocalMp3Player>
 
         RevokeBlobUrl(currentBlobUrl);
         currentBlobUrl = null;
+    }
+
+    private void ReplaceAudioClip(AudioClip clip, bool destroyOnReplace)
+    {
+        if (audioSource.clip != null && destroyCurrentAudioClipOnReplace)
+        {
+            Destroy(audioSource.clip);
+        }
+
+        audioSource.clip = clip;
+        destroyCurrentAudioClipOnReplace = destroyOnReplace;
+    }
+
+    private void PlayUnityAudioSource()
+    {
+        if (audioSource == null || audioSource.clip == null)
+        {
+            return;
+        }
+
+        if (audioSource.time >= audioSource.clip.length)
+        {
+            audioSource.time = 0f;
+        }
+
+        audioSource.Play();
+    }
+
+    private void StopUnityAudioSource()
+    {
+        audioSource.Stop();
+        audioSource.time = 0f;
     }
 
     private static void RevokeBlobUrl(string blobUrl)

@@ -85,3 +85,5 @@ crashlytics-build.properties
 !/Build.wasm*
 !/StreamingAssets/
 !/StreamingAssets/**
+!/ServerData/
+!/ServerData/**
